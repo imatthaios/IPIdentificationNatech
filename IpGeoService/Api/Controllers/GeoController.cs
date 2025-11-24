@@ -39,8 +39,7 @@ namespace Api.Controllers
         [HttpPost("batch")]
         public async Task<IActionResult> EnqueueBatch([FromBody] BatchGeoRequest request)
         {
-            if (request.Ips == null || request.Ips.Count == 0)
-                return BadRequest(new { error = "At least one IP is required." });
+            if (request.Ips.Count == 0) return BadRequest(new { error = "At least one IP is required." });
 
             var result = await _geoService.EnqueueBatchAsync(request.Ips.ToArray());
             if (!result.IsSuccess) return MapErrorToResponse(result.Error);

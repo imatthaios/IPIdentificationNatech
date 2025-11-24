@@ -66,13 +66,12 @@ public class GeoApplicationService : IGeoApplicationService
         {
             var batch = await CreateAndPersistBatchAsync(normalizedIps);
 
-            // fire-and-forget semantics; if this throws, we map to Unexpected
             await _batchProcessor.QueueBatchAsync(normalizedIps, batch.Id);
 
             var dto = new BatchAcceptedDto
             {
                 BatchId = batch.Id,
-                StatusUrl = string.Empty // controller fills this
+                StatusUrl = string.Empty
             };
 
             return Result<BatchAcceptedDto>.Success(dto);
@@ -99,6 +98,7 @@ public class GeoApplicationService : IGeoApplicationService
                 return Result<BatchStatusDto>.Failure("Batch not found.", ErrorType.NotFound);
 
             var dto = MapToBatchStatusDto(batch);
+            
             return Result<BatchStatusDto>.Success(dto);
         }
         catch (Exception ex)
@@ -117,10 +117,9 @@ public class GeoApplicationService : IGeoApplicationService
 
         var trimmed = ip.Trim();
 
-        if (!IPAddress.TryParse(trimmed, out _))
-            return Result<string>.Failure("Invalid IP address format.", ErrorType.Validation);
-
-        return Result<string>.Success(trimmed);
+        return !IPAddress.TryParse(trimmed, out _) ?
+            Result<string>.Failure("Invalid IP address format.", ErrorType.Validation) :
+            Result<string>.Success(trimmed);
     }
 
     private async Task<IpGeoDto?> TryGetFromCacheAsync(string ip)
@@ -217,6 +216,7 @@ public class GeoApplicationService : IGeoApplicationService
             .ToList();
 
         await _batchRepo.CreateAsync(batch);
+        
         return batch;
     }
 

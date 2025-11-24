@@ -1,10 +1,10 @@
 using System.Net;
 using System.Text;
 using Infrastructure.Configuration;
-using Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using FluentAssertions;
+using Infrastructure.Services;
 using Moq;
 
 namespace UnitTests.Infrastructure;

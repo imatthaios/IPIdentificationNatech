@@ -6,6 +6,8 @@ using Infrastructure.External;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
+namespace Infrastructure.Services;
+
 public class GeoProviderClient : IGeoProviderClient
 {
     private readonly HttpClient _http;
