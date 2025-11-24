@@ -1,2 +1,0 @@
-# IPIdentificationNatech
-Natech code assignment

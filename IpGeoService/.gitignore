@@ -1,0 +1,53 @@
+# --------------------------
+# .NET / ASP.NET Core
+# --------------------------
+bin/
+obj/
+*.user
+*.rsuser
+*.suo
+*.cache
+*.config
+*.dbmdl
+*.jfm
+*.pdb
+*.dll
+*.exe
+*.appsettings.local.json
+*.appsettings.Development.json
+
+# Runtime files
+*.log
+*.lock.json
+*.deps.json
+*.runtimeconfig.json
+
+# User secrets
+**/secrets.json
+
+# EF Core migrations (optional)
+#migrations/
+
+# Publish output
+/publish/
+/artifacts/
+
+# Temp files
+*.tmp
+*.temp
+*.bak
+
+# --------------------------
+# IDE: JetBrains Rider / Intelli
+.idea/
+
+# User secrets are already outside repo, but just in case
+secrets.json
+
+# Env files
+.env*
+!env.template
+
+# Docker stuff
+docker-compose.override.yml
+sqlserver_data/
