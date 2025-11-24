@@ -39,8 +39,7 @@ public class GeoApplicationService : IGeoApplicationService
     public async Task<Result<IpGeoDto>> GetGeoForIpAsync(string ip)
     {
         var validation = ValidateIp(ip);
-        if (!validation.IsSuccess)
-            return Result<IpGeoDto>.Failure(validation.Error);
+        if (!validation.IsSuccess) return Result<IpGeoDto>.Failure(validation.Error);
 
         var normalizedIp = validation.Value;
 

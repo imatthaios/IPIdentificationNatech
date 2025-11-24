@@ -1,3 +1,4 @@
+using System;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Infrastructure.Configuration;
@@ -7,55 +8,61 @@ using Infrastructure.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Polly;
-using Polly.Extensions.Http;
+using Microsoft.Extensions.Options;
 
-namespace Infrastructure.Extensions;
-
-public static class ServiceCollectionExtensions
+namespace Infrastructure.Extensions
 {
-    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    public static class ServiceCollectionExtensions
     {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(configuration);
+        public static IServiceCollection AddInfrastructure(
+            this IServiceCollection services,
+            IConfiguration configuration)
+        {
+            var connectionString = configuration.GetConnectionString("DefaultConnection");
 
-        // DB
-        var connectionString = configuration.GetConnectionString("DefaultConnection")
-                               ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new InvalidOperationException(
+                    "Connection string 'DefaultConnection' is not configured.");
+            }
 
-        services.AddDbContext<IpGeoDbContext>(options =>
-            options.UseSqlServer(connectionString));
+            services.AddDbContext<IpGeoDbContext>(options =>
+            {
+                options.UseSqlServer(connectionString);
+            });
 
-        // Repositories
-        services.AddScoped<IBatchRepository, BatchRepository>();
-        services.AddScoped<IBatchItemRepository, BatchItemRepository>();
-        services.AddScoped<IGeoCacheRepository, GeoCacheRepository>();
+            services.Configure<IpGeoProviderOptions>(
+                configuration.GetSection("IpGeoProvider"));
 
-        // Data initializer
-        services.AddScoped<IDataInitializer, DataInitializer>();
+            services.AddHttpClient<IGeoProviderClient, GeoProviderClient>(
+                (sp, httpClient) =>
+                {
+                    var opts = sp.GetRequiredService<IOptions<IpGeoProviderOptions>>().Value;
 
-        // Background processor
-        services.AddHostedService<ChannelBackgroundBatchProcessor>();
-        services.AddSingleton<IBackgroundBatchProcessor>(sp =>
-            (ChannelBackgroundBatchProcessor)sp.GetRequiredService<IHostedService>());
-        
-        // options
-        services.Configure<IpGeoProviderOptions>(
-            configuration.GetSection(IpGeoProviderOptions.SectionName));
+                    if (string.IsNullOrWhiteSpace(opts.BaseUrl))
+                    {
+                        throw new InvalidOperationException(
+                            "IpGeoProviderOptions.BaseUrl is not configured.");
+                    }
 
-        // HttpClient
-        services
-            .AddHttpClient<IGeoProviderClient, GeoProviderClient>()
-            .AddPolicyHandler(GetRetryPolicy());
+                    httpClient.BaseAddress = new Uri(opts.BaseUrl);
+                });
 
-        return services;
-    }
+            services.AddScoped<IBatchRepository, BatchRepository>();
+            services.AddScoped<IBatchItemRepository, BatchItemRepository>();
+            services.AddScoped<IGeoCacheRepository, GeoCacheRepository>();
 
-    private static IAsyncPolicy<HttpResponseMessage> GetRetryPolicy()
-    {
-        return HttpPolicyExtensions
-            .HandleTransientHttpError()
-            .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+            services.AddSingleton<ChannelBackgroundBatchProcessor>();
+
+            services.AddSingleton<IBackgroundBatchProcessor>(sp =>
+                sp.GetRequiredService<ChannelBackgroundBatchProcessor>());
+
+            services.AddHostedService(sp =>
+                sp.GetRequiredService<ChannelBackgroundBatchProcessor>());
+
+            services.AddScoped<DataInitializer>();
+
+            return services;
+        }
     }
 }

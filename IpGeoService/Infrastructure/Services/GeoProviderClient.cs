@@ -6,8 +6,6 @@ using Infrastructure.External;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Infrastructure.Services;
-
 public class GeoProviderClient : IGeoProviderClient
 {
     private readonly HttpClient _http;
@@ -19,22 +17,25 @@ public class GeoProviderClient : IGeoProviderClient
         IOptions<IpGeoProviderOptions> options,
         ILogger<GeoProviderClient> log)
     {
-        _options = options.Value;
+        _options = options.Value ?? throw new ArgumentNullException(nameof(options));
         _http = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = log ?? throw new ArgumentNullException(nameof(log));
-        
-        _http.BaseAddress = new Uri(_options.BaseUrl);
-        
-        if (!string.IsNullOrWhiteSpace(_options.BaseUrl))
-        {
-            _http.BaseAddress = new Uri(_options.BaseUrl, UriKind.Absolute);
-        }
 
-        if (string.IsNullOrWhiteSpace(_options.ApiKey)) return;
-        
-        _http.DefaultRequestHeaders.Remove("apikey");
-        _http.DefaultRequestHeaders.Add("apikey", _options.ApiKey);
+        if (string.IsNullOrWhiteSpace(_options.BaseUrl))
+            throw new ArgumentException("IpGeoProvider BaseUrl must be configured.", nameof(options));
+
+        _http.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/'), UriKind.Absolute);
         _http.Timeout = TimeSpan.FromSeconds(10);
+
+        if (!string.IsNullOrWhiteSpace(_options.ApiKey))
+        {
+            _http.DefaultRequestHeaders.Remove("apikey");
+            _http.DefaultRequestHeaders.Add("apikey", _options.ApiKey);
+        }
+        else
+        {
+            _logger.LogWarning("IpGeoProvider.ApiKey is empty. Requests to ipbase will likely return 401.");
+        }
     }
 
     public async Task<IpGeoDto?> FetchIpInfoAsync(string ip, CancellationToken cancellationToken = default)
@@ -43,9 +44,20 @@ public class GeoProviderClient : IGeoProviderClient
 
         try
         {
-            var response = await _http.GetFromJsonAsync<IpGeoResponse>(
-                url,
-                cancellationToken);
+            var httpResponse = await _http.GetAsync(url, cancellationToken);
+
+            if (!httpResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Geo provider returned status code {StatusCode} for IP {Ip}. Url: {Url}",
+                    (int)httpResponse.StatusCode,
+                    ip,
+                    _http.BaseAddress + url);
+
+                return null;
+            }
+
+            var response = await httpResponse.Content.ReadFromJsonAsync<IpGeoResponse>(cancellationToken: cancellationToken);
 
             if (response is null)
                 return null;
@@ -67,7 +79,7 @@ public class GeoProviderClient : IGeoProviderClient
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error fetching geo for IP {Ip}", ip);
+            _logger.LogError(ex, "Unexpected error fetching geo for IP {Ip}");
             throw;
         }
     }

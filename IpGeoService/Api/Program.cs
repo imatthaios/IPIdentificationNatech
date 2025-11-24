@@ -25,7 +25,7 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<IpGeoDbContext>();
     await db.Database.MigrateAsync();
 
-    var initializer = scope.ServiceProvider.GetRequiredService<IDataInitializer>();
+    var initializer = scope.ServiceProvider.GetRequiredService<DataInitializer>();
     await initializer.InitializeAsync();
 }
 

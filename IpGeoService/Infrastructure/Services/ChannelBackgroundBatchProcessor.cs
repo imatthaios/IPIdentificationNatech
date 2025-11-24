@@ -80,7 +80,7 @@ public class ChannelBackgroundBatchProcessor : BackgroundService, IBackgroundBat
                 item.StartedAtUtc = DateTime.UtcNow;
 
                 var sw = Stopwatch.StartNew();
-                var dto = await geoClient.FetchIpInfoAsync(ip);
+                var dto = await geoClient.FetchIpInfoAsync(ip, stoppingToken);
                 sw.Stop();
 
                 if (dto == null)
@@ -118,7 +118,7 @@ public class ChannelBackgroundBatchProcessor : BackgroundService, IBackgroundBat
                 if (item.DurationMs > 0)
                 {
                     var duration = (double)item.DurationMs.Value;
-                    if (batch.AverageMsPerItem.HasValue && batch.ProcessedCount > 1)
+                    if (batch is { AverageMsPerItem: not null, ProcessedCount: > 1 })
                     {
                         var previous = batch.AverageMsPerItem.Value;
                         batch.AverageMsPerItem =
@@ -151,7 +151,6 @@ public class ChannelBackgroundBatchProcessor : BackgroundService, IBackgroundBat
             catch (Exception ex)
             {
                 _log.LogError(ex, "Error processing IP {Ip} for batch {BatchId}", ip, batchId);
-                // In a production implementation, you'd want retries / DLQ here.
             }
         }
 

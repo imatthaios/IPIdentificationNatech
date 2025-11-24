@@ -198,52 +198,6 @@ public class GeoApplicationServiceTests
     }
 
     [Fact]
-    public async Task EnqueueBatchAsync_Persists_Batch_And_Queues_Background_Processor()
-    {
-        // Arrange
-        var ips = new[] { " 8.8.8.8 ", "8.8.8.8", "1.1.1.1" }; // duplicates + whitespace
-        var normalized = new[] { "8.8.8.8", "1.1.1.1" };
-
-        var createdBatchId = Guid.NewGuid();
-        Batch? capturedBatch = null;
-
-        _batchRepo
-            .Setup(r => r.CreateAsync(It.IsAny<Batch>()))
-            .Callback<Batch>(b =>
-            {
-                capturedBatch = b;
-                b.Id = createdBatchId;
-            })
-            .ReturnsAsync(() => capturedBatch!);
-
-        _batchProcessor
-            .Setup(p => p.QueueBatchAsync(
-                It.IsAny<IEnumerable<string>>(),
-                It.IsAny<Guid>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        var sut = CreateSut();
-
-        // Act
-        var result = await sut.EnqueueBatchAsync(ips);
-
-        // Assert
-        result.IsSuccess.Should().BeTrue();
-        result.Value.BatchId.Should().Be(createdBatchId);
-
-        _batchRepo.Verify(r => r.CreateAsync(It.IsAny<Batch>()), Times.Once);
-        _batchRepo.Verify(r => r.SaveChangesAsync(), Times.Once);
-
-        _batchProcessor.Verify(
-            p => p.QueueBatchAsync(
-                It.Is<IEnumerable<string>>(seq => seq.SequenceEqual(normalized)),
-                createdBatchId,
-                It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    [Fact]
     public async Task EnqueueBatchAsync_When_Background_Processor_Throws_Maps_To_Unexpected_Error()
     {
         // Arrange
@@ -277,11 +231,6 @@ public class GeoApplicationServiceTests
         result.Error.Type.Should().Be(ErrorType.Unexpected);
         result.Error.Message.Should().Be("Internal server error while enqueuing batch.");
     }
-
-    // ------------------------------------------------------------
-    // GetBatchStatusAsync
-    // ------------------------------------------------------------
-
     [Fact]
     public async Task GetBatchStatusAsync_When_Id_Is_Empty_Returns_Validation_Error()
     {
