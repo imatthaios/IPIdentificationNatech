@@ -101,7 +101,7 @@ public class ChannelBackgroundBatchProcessor : BackgroundService, IBackgroundBat
         using (var scope = _serviceProvider.CreateScope())
         {
             var batchRepo = scope.ServiceProvider.GetRequiredService<IBatchRepository>();
-            var batch = await batchRepo.GetByIdAsync(work.BatchId);
+            var batch = await batchRepo.GetByIdAsync(work.BatchId, token);
 
             if (batch == null)
             {
@@ -113,7 +113,7 @@ public class ChannelBackgroundBatchProcessor : BackgroundService, IBackgroundBat
             {
                 batch.Status = BatchStatus.Running;
                 batch.StartedAtUtc ??= DateTime.UtcNow;
-                await batchRepo.SaveChangesAsync();
+                await batchRepo.SaveChangesAsync(token);
             }
         }
 
@@ -130,7 +130,7 @@ public class ChannelBackgroundBatchProcessor : BackgroundService, IBackgroundBat
         using (var scope = _serviceProvider.CreateScope())
         {
             var batchRepo = scope.ServiceProvider.GetRequiredService<IBatchRepository>();
-            var batch = await batchRepo.GetByIdAsync(work.BatchId);
+            var batch = await batchRepo.GetByIdAsync(work.BatchId, token);
 
             if (batch == null)
             {
@@ -166,7 +166,7 @@ public class ChannelBackgroundBatchProcessor : BackgroundService, IBackgroundBat
                 batch.StartedAtUtc ??= DateTime.UtcNow;
             }
 
-            await batchRepo.SaveChangesAsync();
+            await batchRepo.SaveChangesAsync(token);
         }
 
         _log.LogInformation("Finished processing batch {BatchId}", work.BatchId);
@@ -187,7 +187,7 @@ public class ChannelBackgroundBatchProcessor : BackgroundService, IBackgroundBat
             var batchRepo = scope.ServiceProvider.GetRequiredService<IBatchRepository>();
             var cacheRepo = scope.ServiceProvider.GetRequiredService<IGeoCacheRepository>();
 
-            var batch = await batchRepo.GetByIdAsync(batchId);
+            var batch = await batchRepo.GetByIdAsync(batchId, token);
             if (batch == null)
             {
                 _log.LogWarning("Batch {BatchId} not found while processing IP {Ip}", batchId, ip);
@@ -234,15 +234,15 @@ public class ChannelBackgroundBatchProcessor : BackgroundService, IBackgroundBat
                     Latitude = dto.Latitude,
                     Longitude = dto.Longitude,
                     LastFetchedUtc = DateTime.UtcNow
-                });
+                }, token);
 
-                await cacheRepo.SaveChangesAsync();
+                await cacheRepo.SaveChangesAsync(token);
             }
 
             item.CompletedAtUtc = DateTime.UtcNow;
             item.DurationMs = (int)sw.ElapsedMilliseconds;
 
-            await batchRepo.SaveChangesAsync();
+            await batchRepo.SaveChangesAsync(token);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {

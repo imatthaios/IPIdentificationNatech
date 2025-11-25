@@ -5,7 +5,9 @@ namespace Application.Interfaces;
 
 public interface IGeoApplicationService
 {
-    Task<Result<IpGeoDto>> GetGeoForIpAsync(string ip);
-    Task<Result<BatchAcceptedDto>> EnqueueBatchAsync(string[] ips);
-    Task<Result<BatchStatusDto>> GetBatchStatusAsync(Guid batchId);
+    Task<Result<IpGeoDto>> GetGeoForIpAsync(string ip, CancellationToken cancellationToken = default);
+
+    Task<Result<BatchAcceptedDto>> EnqueueBatchAsync(string[] ips, CancellationToken cancellationToken = default);
+
+    Task<Result<BatchStatusDto>> GetBatchStatusAsync(Guid batchId, CancellationToken cancellationToken = default);
 }

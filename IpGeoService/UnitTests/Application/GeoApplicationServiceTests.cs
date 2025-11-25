@@ -6,7 +6,9 @@ using Application.Services;
 using Domain.Entities;
 using Domain.Enums;
 using FluentAssertions;
+using Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace UnitTests.Application;
@@ -19,6 +21,7 @@ public class GeoApplicationServiceTests
     private readonly Mock<IGeoProviderClient> _geoProvider = new();
     private readonly Mock<IBackgroundBatchProcessor> _batchProcessor = new();
     private readonly Mock<ILogger<GeoApplicationService>> _log = new();
+    private readonly Mock<IOptions<IpGeoCacheOptions>> _cacheOptions = new();
 
     private GeoApplicationService CreateSut()
         => new(
@@ -27,7 +30,17 @@ public class GeoApplicationServiceTests
             _cacheRepo.Object,
             _geoProvider.Object,
             _batchProcessor.Object,
+            _cacheOptions.Object,
             _log.Object);
+
+    public GeoApplicationServiceTests()
+    {
+        _cacheOptions.Setup(o => o.Value).Returns(new IpGeoCacheOptions
+        {
+            TtlHours = 12,
+            CleanupIntervalHours = 6
+        });
+    }
     
     [Fact]
     public async Task GetGeoForIpAsync_When_Ip_Is_NullOrWhitespace_Returns_Validation_Error()
@@ -66,21 +79,30 @@ public class GeoApplicationServiceTests
             TimeZone = "America/New_York",
             Latitude = 10.0,
             Longitude = 20.0,
-            LastFetchedUtc = DateTime.UtcNow // well within TTL
+            LastFetchedUtc = DateTime.UtcNow
         };
 
+        _cacheOptions.Setup(o => o.Value).Returns(new IpGeoCacheOptions
+        {
+            TtlHours = 48
+        });
+
         _cacheRepo
-            .Setup(r => r.GetAsync(ip))
+            .Setup(r => r.GetValidAsync(
+                ip,
+                It.IsAny<TimeSpan>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(cacheEntity);
 
         var sut = CreateSut();
 
         // Act
-        var result = await sut.GetGeoForIpAsync(ip);
+        var result = await sut.GetGeoForIpAsync(ip, CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
         var dto = result.Value;
+
         dto.Ip.Should().Be(ip);
         dto.CountryCode.Should().Be("US");
         dto.CountryName.Should().Be("United States");
@@ -100,7 +122,10 @@ public class GeoApplicationServiceTests
         var ip = "1.1.1.1";
 
         _cacheRepo
-            .Setup(r => r.GetAsync(ip))
+            .Setup(r => r.GetValidAsync(
+                ip,
+                It.IsAny<TimeSpan>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync((IpGeoCache?)null);
 
         var providerDto = new IpGeoDto
@@ -120,20 +145,25 @@ public class GeoApplicationServiceTests
         var sut = CreateSut();
 
         // Act
-        var result = await sut.GetGeoForIpAsync(ip);
+        var result = await sut.GetGeoForIpAsync(ip, CancellationToken.None);
 
         // Assert
         result.IsSuccess.Should().BeTrue();
-        result.Value.CountryCode.Should().Be("AU");
+        result.Value!.CountryCode.Should().Be("AU");
 
         _geoProvider.Verify(
             p => p.FetchIpInfoAsync(ip, It.IsAny<CancellationToken>()),
             Times.Once);
 
         _cacheRepo.Verify(
-            r => r.AddOrUpdateAsync(It.Is<IpGeoCache>(c => c.Ip == ip)),
+            r => r.AddOrUpdateAsync(
+                It.Is<IpGeoCache>(c => c.Ip == ip),
+                It.IsAny<CancellationToken>()),
             Times.Once);
-        _cacheRepo.Verify(r => r.SaveChangesAsync(), Times.Once);
+
+        _cacheRepo.Verify(
+            r => r.SaveChangesAsync(It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -143,7 +173,10 @@ public class GeoApplicationServiceTests
         var ip = "8.8.4.4";
 
         _cacheRepo
-            .Setup(r => r.GetAsync(ip))
+            .Setup(r => r.GetValidAsync(
+                ip,
+                It.IsAny<TimeSpan>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync((IpGeoCache?)null);
 
         _geoProvider
@@ -153,7 +186,7 @@ public class GeoApplicationServiceTests
         var sut = CreateSut();
 
         // Act
-        var result = await sut.GetGeoForIpAsync(ip);
+        var result = await sut.GetGeoForIpAsync(ip, CancellationToken.None);
 
         // Assert
         result.IsFailure.Should().BeTrue();
@@ -206,8 +239,8 @@ public class GeoApplicationServiceTests
         Batch? capturedBatch = null;
 
         _batchRepo
-            .Setup(r => r.CreateAsync(It.IsAny<Batch>()))
-            .Callback<Batch>(b =>
+            .Setup(r => r.CreateAsync(It.IsAny<Batch>(), It.IsAny<CancellationToken>()))
+            .Callback<Batch, CancellationToken>((b, _) =>
             {
                 capturedBatch = b;
                 b.Id = batchId;
@@ -224,13 +257,14 @@ public class GeoApplicationServiceTests
         var sut = CreateSut();
 
         // Act
-        var result = await sut.EnqueueBatchAsync(ips);
+        var result = await sut.EnqueueBatchAsync(ips, CancellationToken.None);
 
         // Assert
         result.IsFailure.Should().BeTrue();
         result.Error.Type.Should().Be(ErrorType.Unexpected);
         result.Error.Message.Should().Be("Internal server error while enqueuing batch.");
     }
+    
     [Fact]
     public async Task GetBatchStatusAsync_When_Id_Is_Empty_Returns_Validation_Error()
     {
@@ -250,7 +284,7 @@ public class GeoApplicationServiceTests
         var id = Guid.NewGuid();
 
         _batchRepo
-            .Setup(r => r.GetByIdAsync(id))
+            .Setup(r => r.GetByIdAsync(id, CancellationToken.None))
             .ReturnsAsync((Batch?)null);
 
         var result = await sut.GetBatchStatusAsync(id);
@@ -275,11 +309,11 @@ public class GeoApplicationServiceTests
             ProcessedCount = 5,
             CreatedAtUtc = now.AddMinutes(-2),
             StartedAtUtc = now.AddMinutes(-2),
-            AverageMsPerItem = 1000 // 1 second per item
+            AverageMsPerItem = 1000
         };
 
         _batchRepo
-            .Setup(r => r.GetByIdAsync(id))
+            .Setup(r => r.GetByIdAsync(id, CancellationToken.None))
             .ReturnsAsync(batch);
 
         var sut = CreateSut();
@@ -308,7 +342,7 @@ public class GeoApplicationServiceTests
         var id = Guid.NewGuid();
 
         _batchRepo
-            .Setup(r => r.GetByIdAsync(id))
+            .Setup(r => r.GetByIdAsync(id, CancellationToken.None))
             .ThrowsAsync(new Exception("db error"));
 
         var result = await sut.GetBatchStatusAsync(id);

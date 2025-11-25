@@ -17,16 +17,24 @@ public class GeoProviderClientMappingTests
         // Arrange
         const string ip = "8.8.8.8";
 
-        var json = """
-        {
-          "ip": "8.8.8.8",
-          "country_code": "US",
-          "country_name": "United States",
-          "time_zone": "America/Chicago",
-          "latitude": 37.751,
-          "longitude": -97.822
-        }
-        """;
+        const string json = """
+                            {
+                              "data": {
+                                "ip": "8.8.8.8",
+                                "location": {
+                                  "country": {
+                                    "alpha2": "US",
+                                    "name": "United States"
+                                  },
+                                  "latitude": 37.751,
+                                  "longitude": -97.822
+                                },
+                                "timezone": {
+                                  "id": "America/Chicago"
+                                }
+                              }
+                            }
+                            """;
 
         var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -34,7 +42,10 @@ public class GeoProviderClientMappingTests
         };
 
         var handler = new StubHttpMessageHandler(_ => response);
-        var httpClient = new HttpClient(handler);
+        var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://freegeoip.app/")
+        };
 
         var options = Options.Create(new IpGeoProviderOptions
         {

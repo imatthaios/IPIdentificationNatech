@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace Infrastructure.External;
 
-public sealed class IpGeoResponse
+public sealed class IpGeoResponseDeprecated
 {
     [JsonPropertyName("ip")]
     public string Ip { get; set; } = string.Empty;

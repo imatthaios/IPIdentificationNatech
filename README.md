@@ -49,3 +49,52 @@ Run the solution with Docker Compose
 ```bash
 docker-compose --env-file .env up --build
 ```
+
+### Architecture
+The solution follows a layered architecture with clear separation of concerns:
+- **Api Layer**: Handles HTTP requests and responses, maps DTOs to domain models.
+- **Application Layer**: Contains business logic, use cases, and service interfaces.
+- **Domain Layer**: Defines core entities and value objects.
+- **Infrastructure Layer**: Implements data access, external service communication, and background processing.
+- **Testing**: Unit and integration tests ensure code quality and reliability.
+- **Error Handling**: Uses Result<T> pattern for consistent error handling across layers.
+- **Dependency Injection**: Utilizes ASP.NET Core's built-in DI for managing dependencies.
+- **Configuration Management**: Supports multiple environments with User Secrets and Azure Key Vault.
+- **Logging and Monitoring**: Integrates logging for tracking application behavior and issues.
+- **Background Services**: Implements background processing for tasks like data fetching and caching.
+
+```pgsql
+┌──────────────────────────────────────────────────────────┐
+│                         API Layer                        │
+│  • GET /api/geo/{ip}                                      │
+│  • POST /api/geo/batch                                    │
+│  • GET /api/geo/batch/{id}                                │
+└──────────────────────────────────────────────────────────┘
+│                          ▲
+▼                          │
+┌──────────────────────────────────────────────────────────┐
+│                 Application Layer                        │
+│  • DTOs, Interfaces, Result<T>                           │
+│  • IGeoApplicationService                                │
+│  • IGeoProviderClient (external API abstraction)         │
+│  • IBackgroundBatchProcessor abstraction                 │
+└──────────────────────────────────────────────────────────┘
+│                          ▲
+▼                          │
+┌──────────────────────────────────────────────────────────┐
+│                Infrastructure Layer                      │
+│  • EF Core (IpGeoDbContext, migrations)                  │
+│  • Repositories (Batch, BatchItem, GeoCache)             │
+│  • GeoProviderClient (HttpClient)                        │
+│  • Background Workers:                                   │
+│        - ChannelBackgroundBatchProcessor / RabbitMQ       │
+│  • Dependency Injection, Options pattern                 │
+└──────────────────────────────────────────────────────────┘
+│
+▼
+┌──────────────────────────────────────────────────────────┐
+│                       Database Layer                     │
+│        SQL Server 2022 Express (Docker)                  │
+│        Batches, BatchItems, IpGeoCache                   │
+└──────────────────────────────────────────────────────────┘
+```

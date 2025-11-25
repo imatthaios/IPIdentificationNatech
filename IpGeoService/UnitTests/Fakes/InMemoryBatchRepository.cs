@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using System.Threading;
-using System.Threading.Tasks;
 using Application.Interfaces.Repositories;
 using Domain.Entities;
 
@@ -23,19 +21,19 @@ namespace UnitTests.Fakes
             }
         }
 
-        public Task<Batch?> GetByIdAsync(Guid id)
+        public Task<Batch?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
         {
             _batches.TryGetValue(id, out var batch);
             return Task.FromResult(batch);
         }
 
-        public Task<Batch> CreateAsync(Batch batch)
+        public Task<Batch> CreateAsync(Batch batch, CancellationToken cancellationToken = default)
         {
             _batches[batch.Id] = batch;
             return Task.FromResult(batch);
         }
 
-        public Task SaveChangesAsync()
+        public Task SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             // In-memory – nothing to persist
             return Task.CompletedTask;

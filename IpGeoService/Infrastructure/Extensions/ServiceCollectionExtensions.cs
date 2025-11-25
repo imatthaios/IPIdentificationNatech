@@ -1,3 +1,4 @@
+using System.Net;
 using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Infrastructure.Configuration;
@@ -8,6 +9,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Polly;
+using Polly.Extensions.Http;
 
 namespace Infrastructure.Extensions
 {
@@ -30,22 +33,32 @@ namespace Infrastructure.Extensions
                 options.UseSqlServer(connectionString);
             });
 
-            services.Configure<IpGeoProviderOptions>(
-                configuration.GetSection("IpGeoProvider"));
+            services.Configure<IpGeoProviderOptions>(configuration.GetSection("IpGeoProvider"));
+            services.Configure<IpGeoCacheOptions>(configuration.GetSection("IpGeoCache"));
 
+            services.AddHttpClient<IGeoProviderClient, GeoProviderClient>()
+                .AddPolicyHandler(GetGeoRetryPolicy());
+            
             services.AddHttpClient<IGeoProviderClient, GeoProviderClient>(
-                (sp, httpClient) =>
-                {
-                    var opts = sp.GetRequiredService<IOptions<IpGeoProviderOptions>>().Value;
-
-                    if (string.IsNullOrWhiteSpace(opts.BaseUrl))
+                    (sp, httpClient) =>
                     {
-                        throw new InvalidOperationException(
-                            "IpGeoProviderOptions.BaseUrl is not configured.");
-                    }
+                        var opts = sp.GetRequiredService<IOptions<IpGeoProviderOptions>>().Value;
 
-                    httpClient.BaseAddress = new Uri(opts.BaseUrl);
-                });
+                        if (string.IsNullOrWhiteSpace(opts.BaseUrl))
+                        {
+                            throw new InvalidOperationException("IpGeoProviderOptions.BaseUrl is not configured.");
+                        }
+
+                        httpClient.BaseAddress = new Uri(opts.BaseUrl.TrimEnd('/'), UriKind.Absolute);
+                        httpClient.Timeout = TimeSpan.FromSeconds(10);
+
+                        if (string.IsNullOrWhiteSpace(opts.ApiKey)) return;
+                        httpClient.DefaultRequestHeaders.Remove("apikey");
+                        httpClient.DefaultRequestHeaders.Add("apikey", opts.ApiKey);
+                    })
+                .AddPolicyHandler(GetGeoRetryPolicy());
+            
+            services.AddHostedService<GeoCacheCleanupService>();
 
             services.AddScoped<IBatchRepository, BatchRepository>();
             services.AddScoped<IBatchItemRepository, BatchItemRepository>();
@@ -62,6 +75,19 @@ namespace Infrastructure.Extensions
             services.AddScoped<DataInitializer>();
 
             return services;
+        }
+        
+        private static IAsyncPolicy<HttpResponseMessage> GetGeoRetryPolicy()
+        {
+            return HttpPolicyExtensions
+                .HandleTransientHttpError()
+                .OrResult(msg => msg.StatusCode == (HttpStatusCode)429)
+                .WaitAndRetryAsync(
+                    retryCount: 3,
+                    sleepDurationProvider: retryAttempt =>
+                        TimeSpan.FromSeconds(Math.Pow(2, retryAttempt))
+                        + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 250))
+                );
         }
     }
 }

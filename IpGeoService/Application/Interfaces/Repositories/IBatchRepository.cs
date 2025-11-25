@@ -4,7 +4,7 @@ namespace Application.Interfaces.Repositories;
 
 public interface IBatchRepository
 {
-    Task<Batch?> GetByIdAsync(Guid id);
-    Task<Batch> CreateAsync(Batch batch);
-    Task SaveChangesAsync();
+    Task<Batch?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Batch> CreateAsync(Batch batch, CancellationToken cancellationToken = default);
+    Task SaveChangesAsync(CancellationToken cancellationToken = default);
 }

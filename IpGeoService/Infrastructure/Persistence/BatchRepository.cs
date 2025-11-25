@@ -14,19 +14,20 @@ public class BatchRepository : IBatchRepository
         _db = db;
     }
 
-    public async Task<Batch?> GetByIdAsync(Guid id)
+    public async Task<Batch?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         return await _db.Batches
             .Include(b => b.Items)
-            .SingleOrDefaultAsync(b => b.Id == id);
+            .SingleOrDefaultAsync(b => b.Id == id, cancellationToken);
     }
 
-    public async Task<Batch> CreateAsync(Batch batch)
+    public async Task<Batch> CreateAsync(Batch batch, CancellationToken cancellationToken = default)
     {
-        _db.Batches.Add(batch);
-        await _db.SaveChangesAsync();
+        await _db.Batches.AddAsync(batch, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
         return batch;
     }
 
-    public Task SaveChangesAsync() => _db.SaveChangesAsync();
+    public Task SaveChangesAsync(CancellationToken cancellationToken = default) 
+        => _db.SaveChangesAsync(cancellationToken);
 }

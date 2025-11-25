@@ -5,56 +5,61 @@ using Application.Interfaces;
 using Application.Interfaces.Repositories;
 using Domain.Entities;
 using Domain.Enums;
+using Infrastructure.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Application.Services;
 
 public class GeoApplicationService : IGeoApplicationService
 {
     private readonly IBatchRepository _batchRepo;
-    private readonly IBatchItemRepository _batchItemRepo;
     private readonly IGeoCacheRepository _cacheRepo;
     private readonly IGeoProviderClient _geoProvider;
     private readonly IBackgroundBatchProcessor _batchProcessor;
     private readonly ILogger<GeoApplicationService> _log;
-
-    private readonly TimeSpan _cacheTtl = TimeSpan.FromHours(12);
+    private readonly IpGeoCacheOptions _cacheOptions;
 
     public GeoApplicationService(
         IBatchRepository batchRepo,
-        IBatchItemRepository batchItemRepo,
+        IBatchItemRepository batchItemRepository,
         IGeoCacheRepository cacheRepo,
         IGeoProviderClient geoProvider,
         IBackgroundBatchProcessor batchProcessor,
+        IOptions<IpGeoCacheOptions> cacheOptions,
         ILogger<GeoApplicationService> log)
     {
         _batchRepo = batchRepo;
-        _batchItemRepo = batchItemRepo;
         _cacheRepo = cacheRepo;
         _geoProvider = geoProvider;
         _batchProcessor = batchProcessor;
+        _cacheOptions = cacheOptions.Value;
         _log = log;
     }
 
-    public async Task<Result<IpGeoDto>> GetGeoForIpAsync(string ip)
+    public async Task<Result<IpGeoDto>> GetGeoForIpAsync(
+        string ip,
+        CancellationToken cancellationToken = default)
     {
         var validation = ValidateIp(ip);
-        if (!validation.IsSuccess) return Result<IpGeoDto>.Failure(validation.Error);
+        if (!validation.IsSuccess)
+            return Result<IpGeoDto>.Failure(validation.Error);
 
         var normalizedIp = validation.Value;
 
-        var cached = await TryGetFromCacheAsync(normalizedIp);
-        if (cached != null)
-            return Result<IpGeoDto>.Success(cached);
+        var cached = await TryGetFromCacheAsync(normalizedIp, cancellationToken);
+        if (cached != null) return Result<IpGeoDto>.Success(cached);
 
-        var fetched = await FetchFromProviderAndUpdateCacheAsync(normalizedIp);
+        var fetched = await FetchFromProviderAndUpdateCacheAsync(normalizedIp, cancellationToken);
 
         return fetched == null
             ? Result<IpGeoDto>.Failure("Geo provider did not return data.", ErrorType.Unexpected)
             : Result<IpGeoDto>.Success(fetched);
     }
-    
-    public async Task<Result<BatchAcceptedDto>> EnqueueBatchAsync(string[] ips)
+
+    public async Task<Result<BatchAcceptedDto>> EnqueueBatchAsync(
+        string[] ips,
+        CancellationToken cancellationToken = default)
     {
         var validation = ValidateAndNormalizeIps(ips);
         if (!validation.IsSuccess)
@@ -64,9 +69,9 @@ public class GeoApplicationService : IGeoApplicationService
 
         try
         {
-            var batch = await CreateAndPersistBatchAsync(normalizedIps);
+            var batch = await CreateAndPersistBatchAsync(normalizedIps, cancellationToken);
 
-            await _batchProcessor.QueueBatchAsync(normalizedIps, batch.Id);
+            await _batchProcessor.QueueBatchAsync(normalizedIps, batch.Id, cancellationToken);
 
             var dto = new BatchAcceptedDto
             {
@@ -85,7 +90,9 @@ public class GeoApplicationService : IGeoApplicationService
         }
     }
 
-    public async Task<Result<BatchStatusDto>> GetBatchStatusAsync(Guid batchId)
+    public async Task<Result<BatchStatusDto>> GetBatchStatusAsync(
+        Guid batchId,
+        CancellationToken cancellationToken = default)
     {
         var idValidation = ValidateBatchId(batchId);
         if (!idValidation.IsSuccess)
@@ -93,12 +100,11 @@ public class GeoApplicationService : IGeoApplicationService
 
         try
         {
-            var batch = await _batchRepo.GetByIdAsync(batchId);
+            var batch = await _batchRepo.GetByIdAsync(batchId, cancellationToken);
             if (batch == null)
                 return Result<BatchStatusDto>.Failure("Batch not found.", ErrorType.NotFound);
 
             var dto = MapToBatchStatusDto(batch);
-            
             return Result<BatchStatusDto>.Success(dto);
         }
         catch (Exception ex)
@@ -109,7 +115,7 @@ public class GeoApplicationService : IGeoApplicationService
                 ErrorType.Unexpected);
         }
     }
-    
+
     private static Result<string> ValidateIp(string? ip)
     {
         if (string.IsNullOrWhiteSpace(ip))
@@ -117,36 +123,26 @@ public class GeoApplicationService : IGeoApplicationService
 
         var trimmed = ip.Trim();
 
-        return !IPAddress.TryParse(trimmed, out _) ?
-            Result<string>.Failure("Invalid IP address format.", ErrorType.Validation) :
-            Result<string>.Success(trimmed);
+        return !IPAddress.TryParse(trimmed, out _)
+            ? Result<string>.Failure("Invalid IP address format.", ErrorType.Validation)
+            : Result<string>.Success(trimmed);
     }
 
-    private async Task<IpGeoDto?> TryGetFromCacheAsync(string ip)
+    private async Task<IpGeoDto?> TryGetFromCacheAsync(string ip, CancellationToken token)
     {
-        var cache = await _cacheRepo.GetAsync(ip);
-        if (cache == null)
-            return null;
+        var ttl = TimeSpan.FromHours(_cacheOptions.TtlHours);
+        var cache = await _cacheRepo.GetValidAsync(ip, ttl, token);
 
-        if (DateTime.UtcNow - cache.LastFetchedUtc > _cacheTtl)
-            return null;
-
-        return new IpGeoDto
-        {
-            Ip = cache.Ip,
-            CountryCode = cache.CountryCode,
-            CountryName = cache.CountryName,
-            TimeZone = cache.TimeZone,
-            Latitude = cache.Latitude,
-            Longitude = cache.Longitude
-        };
+        return cache == null ? null : ToDto(cache);
     }
 
-    private async Task<IpGeoDto?> FetchFromProviderAndUpdateCacheAsync(string ip)
+    private async Task<IpGeoDto?> FetchFromProviderAndUpdateCacheAsync(
+        string ip,
+        CancellationToken token)
     {
         try
         {
-            var dto = await _geoProvider.FetchIpInfoAsync(ip);
+            var dto = await _geoProvider.FetchIpInfoAsync(ip, token);
             if (dto == null)
                 return null;
 
@@ -159,9 +155,9 @@ public class GeoApplicationService : IGeoApplicationService
                 Latitude = dto.Latitude,
                 Longitude = dto.Longitude,
                 LastFetchedUtc = DateTime.UtcNow
-            });
+            }, token);
 
-            await _cacheRepo.SaveChangesAsync();
+            await _cacheRepo.SaveChangesAsync(token);
 
             return dto;
         }
@@ -171,6 +167,17 @@ public class GeoApplicationService : IGeoApplicationService
             throw; // global error handler will turn this into 500
         }
     }
+
+    private static IpGeoDto ToDto(IpGeoCache cache) =>
+        new()
+        {
+            Ip = cache.Ip,
+            CountryCode = cache.CountryCode,
+            CountryName = cache.CountryName,
+            TimeZone = cache.TimeZone,
+            Latitude = cache.Latitude,
+            Longitude = cache.Longitude
+        };
 
     private static Result<string[]> ValidateAndNormalizeIps(string[]? ips)
     {
@@ -195,7 +202,9 @@ public class GeoApplicationService : IGeoApplicationService
         return Result<string[]>.Success(normalized);
     }
 
-    private async Task<Batch> CreateAndPersistBatchAsync(string[] ips)
+    private async Task<Batch> CreateAndPersistBatchAsync(
+        string[] ips,
+        CancellationToken token)
     {
         var batch = new Batch
         {
@@ -215,8 +224,7 @@ public class GeoApplicationService : IGeoApplicationService
             })
             .ToList();
 
-        await _batchRepo.CreateAsync(batch);
-        
+        await _batchRepo.CreateAsync(batch, token);
         return batch;
     }
 

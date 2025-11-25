@@ -2,7 +2,7 @@ using System.Net.Http.Json;
 using Application.Dtos;
 using Application.Interfaces;
 using Infrastructure.Configuration;
-using Infrastructure.External;
+using Infrastructure.External.IpGeoResponse;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -17,33 +17,36 @@ public class GeoProviderClient : IGeoProviderClient
     public GeoProviderClient(
         HttpClient httpClient,
         IOptions<IpGeoProviderOptions> options,
-        ILogger<GeoProviderClient> log)
+        ILogger<GeoProviderClient> logger)
     {
-        _options = options.Value ?? throw new ArgumentNullException(nameof(options));
         _http = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-        _logger = log ?? throw new ArgumentNullException(nameof(log));
+        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         if (string.IsNullOrWhiteSpace(_options.BaseUrl))
-            throw new ArgumentException("IpGeoProvider BaseUrl must be configured.", nameof(options));
-
-        _http.BaseAddress = new Uri(_options.BaseUrl.TrimEnd('/'), UriKind.Absolute);
-        _http.Timeout = TimeSpan.FromSeconds(10);
+        {
+            throw new InvalidOperationException("IpGeoProviderOptions.BaseUrl is not configured.");
+        }
 
         if (!string.IsNullOrWhiteSpace(_options.ApiKey))
         {
             _http.DefaultRequestHeaders.Remove("apikey");
             _http.DefaultRequestHeaders.Add("apikey", _options.ApiKey);
         }
-        else
+
+        if (_http.Timeout == TimeSpan.Zero)
         {
-            _logger.LogWarning("IpGeoProvider.ApiKey is empty. Requests to ipbase will likely return 401.");
+            _http.Timeout = TimeSpan.FromSeconds(10);
         }
     }
 
-    public async Task<IpGeoDto?> FetchIpInfoAsync(string ip, CancellationToken cancellationToken = default)
+    public async Task<IpGeoDto?> FetchIpInfoAsync(
+        string ip,
+        CancellationToken cancellationToken = default)
     {
-        var url = $"json/{ip}";
-
+        var baseUrl = _options.BaseUrl!.TrimEnd('/');
+        var url = $"{_options.BaseUrl.TrimEnd('/')}/info?apikey={_options.ApiKey}&ip={ip}";
+        
         try
         {
             var httpResponse = await _http.GetAsync(url, cancellationToken);
@@ -51,37 +54,39 @@ public class GeoProviderClient : IGeoProviderClient
             if (!httpResponse.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
-                    "Geo provider returned status code {StatusCode} for IP {Ip}. Url: {Url}",
+                    "Geo provider returned non-success status code {StatusCode} for IP {Ip} using {Url}",
                     (int)httpResponse.StatusCode,
                     ip,
-                    _http.BaseAddress + url);
+                    url);
 
                 return null;
             }
 
-            var response = await httpResponse.Content.ReadFromJsonAsync<IpGeoResponse>(cancellationToken: cancellationToken);
+            var response = await httpResponse.Content.ReadFromJsonAsync<IpGeoResponse>(
+                cancellationToken: cancellationToken);
 
-            if (response is null)
-                return null;
+            if (response?.Data is null) return null;
+
+            var data = response.Data;
 
             return new IpGeoDto
             {
-                Ip = response.Ip,
-                CountryCode = response.CountryCode,
-                CountryName = response.CountryName,
-                TimeZone = response.TimeZone,
-                Latitude = response.Latitude,
-                Longitude = response.Longitude
+                Ip = data.Ip,
+                CountryCode = data.Location.Country.Alpha2,
+                CountryName = data.Location.Country.Name,
+                TimeZone = data.Timezone?.Id,
+                Latitude = data.Location.Latitude,
+                Longitude = data.Location.Longitude
             };
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "HttpRequestException while fetching geo for IP {Ip}", ip);
+            _logger.LogWarning(ex, "HttpRequestException while fetching geo for IP {Ip} using {Url}", ip, url);
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error fetching geo for IP {Ip}");
+            _logger.LogError(ex, "Unexpected error fetching geo for IP {Ip} using {Url}", ip, url);
             throw;
         }
     }
