@@ -60,3 +60,43 @@ flowchart TD
     App --> Infra[Infrastructure Layer<br/>EF Core / GeoProviderClient / Background Workers]
     Infra --> Db[(SQL Server<br/>IpGeoDb)]
     Infra --> Geo[External Geo Provider<br/>(ipstack, etc.)]
+```
+
+🧪 Testing
+
+Unit tests for:
+Application services
+Result pattern and basic domain rules
+Integration tests (API + EF Core + external provider abstraction)
+
+⚙️ Configuration & Secrets
+Local development:
+User Secrets
+```bash
+cd Api
+dotnet user-secrets init
+dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=IpGeoDb;User Id=SA;Password=<password>;TrustServerCertificate=True;"
+dotnet user-secrets set "GeoProvider:BaseUrl" "https://api.ipstack.com/"
+dotnet user-secrets set "GeoProvider:ApiKey" "<your_ipstack_api_key>"
+```
+
+Docker Compose + .env
+Create a .env file:
+```env
+SQL_SA_PASSWORD=<your-password>
+CONNECTIONSTRINGS__DEFAULTCONNECTION=Server=sqlserver,1433;Database=IpGeoDb;User Id=sa;Password=<your-password>;TrustServerCertificate=True;
+
+IPGEOPROVIDER__BASEURL=https://api.ipstack.com/
+IPGEOPROVIDER__APIKEY=<your_ipstack_api_key>
+```
+Run with Docker:
+```bash
+docker-compose --env-file .env up --build
+```
+
+And locally:
+```bash
+dotnet restore
+dotnet run --project Api
+```
+
