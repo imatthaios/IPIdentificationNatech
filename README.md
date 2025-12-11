@@ -1,100 +1,62 @@
-IpGeoService solution
-Projects:
- - Api: ASP.NET Core Web API (Controllers, DTOs, mapping)
- - Application: Use cases, interfaces, services returning Result<T>
- - Domain: Entities, value objects
- - Infrastructure: EF DbContext, Repositories, HttpClients, BackgroundService
- - UnitTests / IntegrationTests
+# IP Geolocation & Batch Enrichment Service (ASP.NET Core)
 
-### Secrets
-- Use User Secrets for local development
-- Use Azure Key Vault for production
-```json
-{
-  "ConnectionStrings:DefaultConnection": "Server=localhost,1433;Database=IpGeoDb;User Id=SA;Password=<password>;TrustServerCertificate=True;"
-}
-```
-for linux based the path is:
-```cli
-~/.microsoft/usersecrets/<secrets_id>/secrets.json
-```
+This service exposes an ASP.NET Core Web API for **IP address geolocation and enrichment**.  
+It supports **single lookups** and **batch processing**, backed by **SQL Server** and an external IP geo provider (e.g. ipstack).
 
-for windows based the path is:
-```powershell
- %APPDATA%\Microsoft\UserSecrets\<secrets_id>\secrets.json
-```
-```bash
-cd Api
-dotnet user-secrets init
+Originally built as a coding assignment, the project is structured and documented as a **production-ready microservice**.
 
-dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Server=localhost,1433;Database=IpGeoDb;User Id=SA;Password=<password>;TrustServerCertificate=True;"
-dotnet user-secrets set "GeoProvider:BaseUrl" "https://api.ipstack.com/"
-dotnet user-secrets set "GeoProvider:ApiKey" "<your_ipstack_api_key>"
-```
+---
 
-Create a .env file for local development with Docker Compose
-```dotenv
-# SQL SA password used only for local dev
-SQL_SA_PASSWORD=<your-password>
+## ✨ Features
 
-# Connection string for the API (note: host is the docker service name "sqlserver")
-CONNECTIONSTRINGS__DEFAULTCONNECTION='Server=sqlserver,1433;Database=IpGeoDb;User Id=sa;Password=<your-password>;TrustServerCertificate=True;'
+- `GET /api/geo/{ip}` – Single IP geolocation lookup
+- `POST /api/geo/batch` – Submit a batch of IP addresses for asynchronous processing
+- `GET /api/geo/batch/{id}` – Retrieve batch processing status & results
+- External IP provider integration (configurable via `GeoProvider` settings)
+- Layered architecture (API / Application / Domain / Infrastructure)
+- SQL Server persistence with EF Core (Dockerized)
+- Background batch processing (channels / RabbitMQ-ready)
+- Strong focus on **configuration, secrets, and cloud readiness**
 
-# Geo provider config
-IPGEOPROVIDER__BASEURL=https://api.ipstack.com/
-IPGEOPROVIDER__APIKEY=<your_ipstack_api_key>
-```
+---
 
-Run the solution with Docker Compose
-```bash
-docker-compose --env-file .env up --build
-```
+## 🧱 Architecture
 
-### Architecture
 The solution follows a layered architecture with clear separation of concerns:
-- **Api Layer**: Handles HTTP requests and responses, maps DTOs to domain models.
-- **Application Layer**: Contains business logic, use cases, and service interfaces.
-- **Domain Layer**: Defines core entities and value objects.
-- **Infrastructure Layer**: Implements data access, external service communication, and background processing.
-- **Testing**: Unit and integration tests ensure code quality and reliability.
-- **Error Handling**: Uses Result<T> pattern for consistent error handling across layers.
-- **Dependency Injection**: Utilizes ASP.NET Core's built-in DI for managing dependencies.
-- **Configuration Management**: Supports multiple environments with User Secrets and Azure Key Vault.
-- **Logging and Monitoring**: Integrates logging for tracking application behavior and issues.
-- **Background Services**: Implements background processing for tasks like data fetching and caching.
 
-```pgsql
-┌──────────────────────────────────────────────────────────┐
-│                         API Layer                        │
-│  • GET /api/geo/{ip}                                      │
-│  • POST /api/geo/batch                                    │
-│  • GET /api/geo/batch/{id}                                │
-└──────────────────────────────────────────────────────────┘
-│                          ▲
-▼                          │
-┌──────────────────────────────────────────────────────────┐
-│                 Application Layer                        │
-│  • DTOs, Interfaces, Result<T>                           │
-│  • IGeoApplicationService                                │
-│  • IGeoProviderClient (external API abstraction)         │
-│  • IBackgroundBatchProcessor abstraction                 │
-└──────────────────────────────────────────────────────────┘
-│                          ▲
-▼                          │
-┌──────────────────────────────────────────────────────────┐
-│                Infrastructure Layer                      │
-│  • EF Core (IpGeoDbContext, migrations)                  │
-│  • Repositories (Batch, BatchItem, GeoCache)             │
-│  • GeoProviderClient (HttpClient)                        │
-│  • Background Workers:                                   │
-│        - ChannelBackgroundBatchProcessor / RabbitMQ       │
-│  • Dependency Injection, Options pattern                 │
-└──────────────────────────────────────────────────────────┘
-│
-▼
-┌──────────────────────────────────────────────────────────┐
-│                       Database Layer                     │
-│        SQL Server 2022 Express (Docker)                  │
-│        Batches, BatchItems, IpGeoCache                   │
-└──────────────────────────────────────────────────────────┘
-```
+- **API Layer**
+  - ASP.NET Core controllers
+  - Request/response DTOs and mapping to domain models
+  - HTTP endpoints for sync & async operations
+
+- **Application Layer**
+  - Use cases & application services (`IGeoApplicationService`)
+  - Result pattern for consistent error handling
+  - Abstractions for external geo providers & background processing
+
+- **Domain Layer**
+  - Core geo entities, value objects, and invariants
+  - No infrastructure dependencies
+
+- **Infrastructure Layer**
+  - EF Core DbContext (`IpGeoDbContext`) & repositories (Batches, BatchItems, GeoCache)
+  - `GeoProviderClient` using `HttpClient`
+  - Background workers (channel-based processor and RabbitMQ-based alternative)
+  - Options pattern & DI registrations
+
+- **Database**
+  - SQL Server 2022 Express (Docker)
+  - Tables for Batches, BatchItems, and IP geolocation cache
+
+---
+
+## 🗺 Architecture Diagram
+
+```mermaid
+flowchart TD
+    Client[Client] --> Api[API Layer<br/>Controllers / DTOs]
+    Api --> App[Application Layer<br/>Use Cases / Services / Result<T>]
+    App --> Domain[Domain Layer<br/>Entities / Value Objects]
+    App --> Infra[Infrastructure Layer<br/>EF Core / GeoProviderClient / Background Workers]
+    Infra --> Db[(SQL Server<br/>IpGeoDb)]
+    Infra --> Geo[External Geo Provider<br/>(ipstack, etc.)]
